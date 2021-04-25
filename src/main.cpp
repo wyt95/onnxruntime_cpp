@@ -19,7 +19,10 @@
 
 int main(int argc, char **argv)
 {
-     FaceDetector fd("/mnt/share/code/onnxruntime_cpp/bin/");
+    vector<string> model_path{"/mnt/share/code/onnxruntime_cpp/bin/optimaizer_pnet.onnx", 
+                            "/mnt/share/code/onnxruntime_cpp/bin/optimaizer_rnet.onnx",
+                            "/mnt/share/code/onnxruntime_cpp/bin/optimaizer_onet.onnx"};
+     FaceDetector fd(model_path);
     
     vector<string> imgList;
     readFileList("/mnt/share/code/onnxruntime_cpp/bin/face/", imgList);
