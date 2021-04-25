@@ -1,8 +1,6 @@
 #include <facedetector.h>
 
-Ort::Env env{ ORT_LOGGING_LEVEL_WARNING, "test" };
-
-FaceDetector::FaceDetector(std::vector<string> model_dir, const MODEL_VERSION model_version)
+FaceDetector::FaceDetector(std::vector<string> model_dir/*, const MODEL_VERSION model_version*/)
 {
     session_option.SetIntraOpNumThreads(1);
     session_option.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
@@ -28,111 +26,32 @@ FaceDetector::~FaceDetector()
 
 void FaceDetector::Release()
 {
-    if (!m_PNetInputNodeNames.empty())
-    {
-        for (auto it : m_PNetInputNodeNames)
-        {
-            free(it);
-            it = nullptr;
-        }
-    }
-
-    if (!m_PNetOutputNodeNames.empty())
-    {
-        for (auto it : m_PNetOutputNodeNames)
-        {
-            free(it);
-            it = nullptr;
-        }
-    }
-
-    if (!m_RNetInputNodeNames.empty())
-    {
-        for (auto it : m_RNetInputNodeNames)
-        {
-            free(it);
-            it = nullptr;
-        }
-    }
-
-    if (!m_RNetOutputNodeNames.empty())
-    {
-        for (auto it : m_RNetOutputNodeNames)
-        {
-            free(it);
-            it = nullptr;
-        }
-    }
-
-    if (!m_ONetInputNodeNames.empty())
-    {
-        for (auto it : m_ONetInputNodeNames)
-        {
-            free(it);
-            it = nullptr;
-        }
-    }
-
-    if (!m_ONetOutputNodeNames.empty())
-    {
-        for (auto it : m_ONetOutputNodeNames)
-        {
-            free(it);
-            it = nullptr;
-        }
-    }
+    ;
 }
 
-void FaceDetector::wrapInputLayer(boost::shared_ptr< Net<float> > net, vector< cv::Mat >* input_channels)
+void FaceDetector::copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int i, const char *p_str)
 {
-    Blob<float>* input_layer = net->input_blobs()[0];
-    
-    int width = input_layer->width();
-    int height = input_layer->height();
-    
-    float* input_data = input_layer->mutable_cpu_data();
-    for(int j = 0; j < input_layer->num(); j++)
-    {
-        for(int i = 0; i < input_layer->channels(); i ++)
-        {
-            cv::Mat channel(height, width, CV_32FC1, input_data);
-            input_channels->push_back(channel);
-            input_data += width * height;
-        }
-    }
-}
+    cv::Mat copy_img = img.clone();
+    cv::Mat chop_img;
 
-void FaceDetector::pyrDown(const vector<cv::Mat>& img_channels, float scale, vector< cv::Mat >* input_channels)
-{
-    assert(img_channels.size() == input_channels->size());
-    int hs = (*input_channels)[0].rows;
-    int ws = (*input_channels)[0].cols;
-    cv::Mat img_resized;
-    for(int i = 0; i < img_channels.size(); i ++)
-    {
-        cv::resize(img_channels[i], (*input_channels)[i], cv::Size(ws, hs));
-    }
-}
+    int height = target_size.height;
+    int width = target_size.width;
+    float src_height = abs(input_box.px1 - input_box.px2);
+    float src_width = abs(input_box.py1 - input_box.py2);
+#ifdef IMAGE_DEBUG
+    printf("src_height:%f, src_width:%f\n", src_height, src_width);
+    printf("===%d===px1: %d; px2: %d; py1: %d; py2: %d\n", i, input_box.px1, input_box.px2, input_box.py1, input_box.py2);
+#endif
+    chop_img = copy_img(cv::Range(input_box.px1, input_box.px2), cv::Range(input_box.py1, input_box.py2));
 
-void FaceDetector::buildInputChannels(const vector< cv::Mat >& img_channels, const std::vector<BoundingBox>& boxes,
-                                      const cv::Size& target_size, vector< cv::Mat >* input_channels)
-{
-    //assert(img_channels.size() * boxes.size() == input_channels->size() );
-    cv::Rect img_rect(0, 0, img_channels[0].cols, img_channels[0].rows);
-    for(int n = 0; n < boxes.size(); n++)
-    {
-        cv::Rect rect;
-        rect.x = boxes[n].x1;
-        rect.y = boxes[n].y1;
-        rect.width = boxes[n].x2 - boxes[n].x1 + 1;
-        rect.height = boxes[n].y2 - boxes[n].y1 + 1;
-        cv::Rect cuted_rect = rect & img_rect;
-        cv::Rect inner_rect(cuted_rect.x - rect.x, cuted_rect.y - rect.y, cuted_rect.width, cuted_rect.height);
-        for(int c = 0; c < img_channels.size(); c++)
-        {
-            cv::Mat tmp(rect.height, rect.width, CV_32FC1, cv::Scalar(0.0));
-            img_channels[c](cuted_rect).copyTo(tmp(inner_rect));
-            cv::resize(tmp, (*input_channels)[n * img_channels.size() + c], target_size);
+    chop_img.convertTo( chop_img, CV_32FC3, 0.0078125, -127.5 * 0.0078125);
+	cv::resize(chop_img, chop_img, cv::Size(width, height));
+
+    for (int c = 0; c < 3; c++) {
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                data_to[c*width*height + i*height + j] = (chop_img.ptr<float>(j)[i*3+c]);
+            }
         }
     }
 }
@@ -146,10 +65,6 @@ void FaceDetector::generateBoundingBox(const vector<float>& boxRegs, const vecto
     filterOutBoxes.clear();
     int stride = 2;
     int cellsize = 12;
-    assert(box_shape.size() == cls_shape.size());
-    assert(box_shape[3] == cls_shape[3] && box_shape[2] == cls_shape[2]);
-    assert(box_shape[0] == 1 && cls_shape[0] == 1);
-    assert(box_shape[1] == 4 && cls_shape[1] == 2);
     int w = box_shape[3];
     int h = box_shape[2];
     //int n = box_shape[0];
@@ -157,7 +72,7 @@ void FaceDetector::generateBoundingBox(const vector<float>& boxRegs, const vecto
     {
         for(int x = 0; x < w; x ++)
         {
-            float score =     cls[0 * 2 * w * h + 1 * w * h + w * y + x];
+            float score = cls[0 * 2 * w * h + 1 * w * h + w * y + x];
             if ( score >= threshold)
             {
                 BoundingBox box;
@@ -185,9 +100,6 @@ void FaceDetector::filteroutBoundingBox(const vector< FaceDetector::BoundingBox 
                                         float threshold, vector< FaceDetector::BoundingBox >& filterOutBoxes)
 {
     filterOutBoxes.clear();
-    assert(box_shape.size() == cls_shape.size());
-    assert(box_shape[0] == boxes.size() && cls_shape[0] == boxes.size());
-    assert(box_shape[1] == 4 && cls_shape[1] == 2);
     if(points.size() > 0)
     {
         assert(points_shape[0] == boxes.size() && points_shape[1] == 10);
@@ -234,52 +146,55 @@ void FaceDetector::filteroutBoundingBox(const vector< FaceDetector::BoundingBox 
     }
 }
 
-void FaceDetector::nms_cpu(vector<BoundingBox>& boxes, float threshold, NMS_TYPE type, vector<BoundingBox>& filterOutBoxes)
-{
-    filterOutBoxes.clear();
-    if(boxes.size() == 0)
-        return;
-    //descending sort
-    sort(boxes.begin(), boxes.end(), CmpBoundingBox() );
-    vector<size_t> idx(boxes.size());
-    for(int i = 0; i < idx.size(); i++)
-    { 
-        idx[i] = i; 
-    }
-    while(idx.size() > 0)
-    {
-        int good_idx = idx[0];
-        filterOutBoxes.push_back(boxes[good_idx]);
-        //hypothesis : the closer the scores are similar
-        vector<size_t> tmp = idx;
-        idx.clear();
-        for(int i = 1; i < tmp.size(); i++)
-        {
-            int tmp_i = tmp[i];
-            float inter_x1 = std::max( boxes[good_idx].x1, boxes[tmp_i].x1 );
-            float inter_y1 = std::max( boxes[good_idx].y1, boxes[tmp_i].y1 );
-            float inter_x2 = std::min( boxes[good_idx].x2, boxes[tmp_i].x2 );
-            float inter_y2 = std::min( boxes[good_idx].y2, boxes[tmp_i].y2 );
-             
-            float w = std::max((inter_x2 - inter_x1 + 1), 0.0F);
-            float h = std::max((inter_y2 - inter_y1 + 1), 0.0F);
-            
-            float inter_area = w * h;
-            float area_1 = (boxes[good_idx].x2 - boxes[good_idx].x1 + 1) * (boxes[good_idx].y2 - boxes[good_idx].y1 + 1);
-            float area_2 = (boxes[i].x2 - boxes[i].x1 + 1) * (boxes[i].y2 - boxes[i].y1 + 1);
-            float o = ( type == UNION ? (inter_area / (area_1 + area_2 - inter_area)) : (inter_area / std::min(area_1 , area_2)) );           
-            if( o <= threshold )
-                idx.push_back(tmp_i);
-        }
-    }
+float FaceDetector::iou(BoundingBox box1, BoundingBox box2, NMS_TYPE type) 
+{ 
+    float inter_x1 = std::max(box1.x1, box2.x1); 
+    float inter_y1 = std::max(box1.y1, box2.y1); 
+    float inter_x2 = std::min(box1.x2, box2.x2); 
+    float inter_y2 = std::min(box1.y2, box2.y2); 
+
+    float w = std::max((inter_x2 - inter_x1 + 1), 0.0F);
+    float h = std::max((inter_y2 - inter_y1 + 1), 0.0F);
+    float inter_area = w * h;
+    float area_1 = (box1.x2 - box1.x1 + 1) * (box1.y2 - box1.y1 + 1);
+    float area_2 = (box2.x2 - box2.x1 + 1) * (box2.y2 - box2.y1 + 1);
+    float iou = ( type == UNION ? (inter_area / (area_1 + area_2 - inter_area)) : (inter_area / std::min(area_1 , area_2)) );
+
+    return iou; 
 }
 
-void FaceDetector::GetOnnxModelInputInfo(Ort::Session &session_net;, std::vector<const char*> &input_node_names, std::vector<const char*> &output_node_names)
+vector<BoundingBox> FaceDetector::nms(std::vector<BoundingBox>& vec_boxs, float threshold, NMS_TYPE type) 
+{ 
+    vector<BoundingBox> results; 
+    while(vec_boxs.size() > 0)
+    {
+        sort(vec_boxs.begin(), vec_boxs.end(), CmpBoundingBox() );
+        results.push_back(vec_boxs[0]);
+        int index = 1;
+        while(index < vec_boxs.size())
+        {
+            float iou_value = iou(vec_boxs[0], vec_boxs[index], type);
+            if(iou_value > threshold)
+                vec_boxs.erase(vec_boxs.begin() + index);
+            else
+                index++;
+        }
+        vec_boxs.erase(vec_boxs.begin());
+    }
+
+    return results;
+} 
+
+void FaceDetector::GetOnnxModelInputInfo(Ort::Session& session_net, 
+                                            std::vector<const char*> &input_node_names, 
+                                            std::vector<int64_t> &input_node_dims, 
+                                            std::vector<const char*> &output_node_names, 
+                                            std::vector<int64_t> &output_node_dims)
 {
     size_t num_input_nodes = session_net.GetInputCount();
-    //std::vector<const char*> input_node_names(num_input_nodes);
     input_node_names.resize(num_input_nodes);
-    std::vector<int64_t> input_node_dims;
+    //std::vector<int64_t> input_node_dims;
+    //char* input_name = nullptr;
 
     // print model input layer (node names, types, shape etc.)
     Ort::AllocatorWithDefaultOptions allocator;
@@ -308,12 +223,13 @@ void FaceDetector::GetOnnxModelInputInfo(Ort::Session &session_net;, std::vector
             printf("Input %d : dim %d=%jd\n", i, j, input_node_dims[j]);
         }
 
-        allocator.Free(input_name);
+        //allocator.Free(input_name);
     }
 
     size_t num_output_nodes = session_net.GetOutputCount();
     output_node_names.resize(num_output_nodes);
-    std::vector<int64_t> output_node_dims;
+    //std::vector<int64_t> output_node_dims;
+    //char* output_name = nullptr;
 
     printf("Number of outputs = %zu\n", num_output_nodes);
     // iterate over all output nodes
@@ -336,7 +252,7 @@ void FaceDetector::GetOnnxModelInputInfo(Ort::Session &session_net;, std::vector
             printf("output %d : dim %d=%jd\n", i, j, output_node_dims[j]);
         }
 
-        allocator.Free(output_name);
+       //allocator.Free(output_name);
     }
 
 }
@@ -362,123 +278,159 @@ int64_t FaceDetector::GetOnnxModelInfo(std::vector<string> model_dir)
     //O
     session_ONet(env, m_oModel_dir.c_str(), session_option);
 
-    GetOnnxModelInputInfo(session_PNet, m_PNetInputNodeNames, m_PNetOutputNodeNames);
-    GetOnnxModelInputInfo(session_RNet, m_RNetInputNodeNames, m_RNetOutputNodeNames);
-    GetOnnxModelInputInfo(session_ONet, m_ONetInputNodeNames, m_ONetOutputNodeNames);
+    GetOnnxModelInputInfo(session_PNet, m_PNetInputNodeNames, m_PNetInputNodesDims, m_PNetOutputNodeNames, m_PNetOutputNodesDims);
+    GetOnnxModelInputInfo(session_RNet, m_RNetInputNodeNames, m_RNetInputNodesDims, m_RNetOutputNodeNames, m_RNetOutputNodesDims);
+    GetOnnxModelInputInfo(session_ONet, m_ONetInputNodeNames, m_ONetInputNodesDims, m_ONetOutputNodeNames, m_ONetOutputNodesDims);
 
     return YKX_SUCCESS;
 }
 
 //#define IMAGE_DEBUG
-vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, const COLOR_ORDER color_order, const IMAGE_DIRECTION orient, \
+vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, const COLOR_ORDER color_order,  const IMAGE_DIRECTION orient,\
                                                             int min_size, float P_thres, float R_thres, float O_thres, bool is_fast_resize,\
                                                              float scale_factor)
 {
     /*change image format*/
     cv::Mat sample;
-    if( img.channels() == 3 && num_channels_ == 1)
-        cv::cvtColor(img, sample, cv::COLOR_BGR2GRAY);
-    else if (img.channels() == 4 && num_channels_ == 1)
-        cv::cvtColor(img, sample, cv::COLOR_BGRA2GRAY);
-    else if (img.channels() == 4 && num_channels_ == 3)
-        if( color_order == RGBA)
-            cv::cvtColor(img, sample, cv::COLOR_RGBA2RGB);
-        else
-            cv::cvtColor(img, sample, cv::COLOR_BGRA2BGR);
-    else if ( img.channels() == 1 && num_channels_ == 3 )
-        cv::cvtColor(img, sample, cv::COLOR_GRAY2RGB);
-    else
-        sample = img;
+    sample = img.clone();
     cv::Mat sample_normalized;
-    //convert to float and normalize
-    sample.convertTo( sample_normalized, CV_32FC3, img_var, -img_mean * img_var);
 
-    if(orient == IMAGE_DIRECTION::ORIENT_UP)
-        sample_normalized = sample_normalized.t();
-    else if(orient == IMAGE_DIRECTION::ORIENT_DOWN){
-        cv::flip(sample_normalized, sample_normalized, -1);
-        sample_normalized = sample_normalized.t();
-    }
-    else if(orient == IMAGE_DIRECTION::ORIENT_LEFT)
-    {
-        cv::flip(sample_normalized, sample_normalized, -1);
-    }
-
-    vector<float> points;
-    const int img_H = sample_normalized.rows;
-    const int img_W = sample_normalized.cols;
-    int minl  = cv::min(img_H, img_W);
-    //split the input image
+    //split the input image RGB->BGR
     vector<cv::Mat> sample_norm_channels;
-    cv::split(sample_normalized, sample_norm_channels);
+    cv::split(sample, sample_norm_channels);
     if(color_order == BGR || color_order == BGRA)
     {
         cv::Mat tmp = sample_norm_channels[0];
         sample_norm_channels[0] = sample_norm_channels[2];
         sample_norm_channels[2] = tmp;
     }
+    cv::merge(sample_norm_channels, sample);
 
+    vector<float> points;
+    const int img_H = img.rows;
+    const int img_W = img.cols;
+    int minl  = cv::min(img_H, img_W);
+    
     float m = 12.0 / min_size;
     minl *= m;
     vector<float> all_scales;
-    float cur_scale = 1.0;
-    while( minl >= 12.0 )
+    int factor_count = 0;
+    while(minl >= 12.0)
     {
-        all_scales.push_back( m * cur_scale);
-        cur_scale *= scale_factor;
+        all_scales.push_back(m * pow(scale_factor , factor_count));
         minl *= scale_factor;
+        factor_count += 1;
     }
     /*stage 1: P_Net forward can get rectangle and regression */
     vector<BoundingBox> totalBoxes;
-    for(int i = 0; i < all_scales.size(); i ++)
+    for (auto cur_scale : all_scales)
     {
-        vector<cv::Mat> pyr_channels;
-        cur_scale = all_scales[i];
+
         int hs = cvCeil(img_H * cur_scale);
         int ws = cvCeil(img_W * cur_scale);
+        cv::Mat OutputPic, OutputPic_2;
+        resize(sample, OutputPic, Size(ws, hs));
+        //convert to float and normalize
+        OutputPic.convertTo( OutputPic_2, CV_32FC3, 0.0078125, -127.5 * 0.0078125);
         //对输入的形状进行变化
         size_t input_tensor_size = 1 * hs * ws * 3;
         std::vector<float> input_image_(input_tensor_size);
         std::array<int64_t, 4> input_shape_{ 1, 3, hs, ws };
-        Ort::Value input_tensor_pnet = Ort::Value::CreateTensor<float>(memory_info, 
-                                                                    input_image_.data(), 
-                                                                    input_image_.size(), 
-                                                                    input_shape_.data(), 
-                                                                    input_shape_.size());
-#if 0
-        Blob<float>* input_layer = P_Net->input_blobs()[0];
-        input_layer->Reshape(1, num_channels_, hs, ws);
-        //// forward dimension change to all layers
-        P_Net->Reshape();
-        //wrap input layers
-        wrapInputLayer( P_Net, &pyr_channels);
-        //对图像每个通道进行下采样
-        pyrDown(sample_norm_channels, cur_scale, &pyr_channels);
-        //P Net forward operation
-        const vector<Blob<float>*> out = P_Net->Forward();
-        /* copy the output layer to a vector*/
-        Blob<float>* output_layer0 = out[0];
-        vector<int> box_shape = output_layer0->shape();
-        int output_size = box_shape[0] * box_shape[1] * box_shape[2] * box_shape[3];
-        const float* begin0 = output_layer0->cpu_data();
-#endif
-        const float* end0 = output_size + begin0;
-        vector<float> regs(begin0, end0);
-        
-        Blob<float>* output_layer1 = out[1];
-        vector<int> cls_shape = output_layer1->shape();
-        output_size = cls_shape[0] * cls_shape[1] * cls_shape[2] * cls_shape[3];
-        const float* begin1 = output_layer1->cpu_data();
     
-        const float* end1 = output_size + begin1;
-        vector<float> cls(begin1, end1);
+        float* output = input_image_.data();
+        fill(input_image_.begin(), input_image_.end(), 0.f);
+        //HWC->NCWH
+        for (int c = 0; c < 3; c++) {
+            for (int i = 0; i < ws; i++) {
+                for (int j = 0; j < hs; j++) {
+                    output[c*ws*hs + i*hs + j] = (OutputPic_2.ptr<float>(j)[i*3+c]);
+                }
+            }
+        }
+
+        // create input tensor object from data values
+        Ort::Value input_tensor_pnet = Ort::Value::CreateTensor<float>(memory_info, input_image_.data(), input_image_.size(), input_shape_.data(), input_shape_.size());
+
+        auto input_type_info = input_tensor_pnet.GetTensorTypeAndShapeInfo();
+        std::vector<int64_t> input_type_info_dims = input_type_info.GetShape();
+        for (int i = 0; i < input_type_info_dims.size(); i++)
+        {
+           printf("input_type_info_dims shape [%d] =  %ld\n", i, input_type_info_dims[i]);
+        }
+        
+        auto output_tensors_pnet = session_PNet.Run(Ort::RunOptions{nullptr}, m_PNetInputNodeNames.data(), &input_tensor_pnet, 1, m_PNetOutputNodeNames.data(), m_PNetOutputNodeNames.size());
+        printf("output_tensors_pnet.size: [%d]\n", (int)output_tensors_pnet.size());
+
+        //2-Y 框
+        printf("---------------2-Y-------------------\n");
+        printf("Output %s:\n", m_PNetOutputNodeNames[0]);
+        Ort::TypeInfo type_info_0 = output_tensors_pnet[0].GetTypeInfo();
+        auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
+        size_t tensor_size_0 = tensor_info_0.GetElementCount();
+        vector<int64_t>  output_node_dims_0 = tensor_info_0.GetShape();
+        //printf("output_node_dims_0: %d \n", (int)output_node_dims_0.size());
+        // printf("output_node_dims_0 shape: ");
+        // for(int i=0; i < output_node_dims_0.size(); i++)
+        // {
+        //     printf("  %ld  ", output_node_dims_0[i]);
+        // }
+        // printf("\n");
+        float *outarr0 = output_tensors_pnet[0].GetTensorMutableData<float>();
+        printf("tensor_size_0: %d \n", (int)tensor_size_0);
+        vector<float> out0{outarr0, outarr0 + tensor_size_0};
+        printf("out0_size: %d \n", (int)out0.size());
+
+        //P-Y softmaxOutput
+        //printf("----------------P-Y------------------\n");
+        //printf("Output %s:\n", m_PNetOutputNodeNames[1]);
+        Ort::TypeInfo type_info_1 = output_tensors_pnet[1].GetTypeInfo();
+        auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
+        size_t tensor_size_1 = tensor_info_1.GetElementCount();
+        vector<int64_t>  output_node_dims_1 = tensor_info_1.GetShape();
+        //printf("output_node_dims_1: %d \n", (int)output_node_dims_1.size());
+        //printf("output_node_dims_1 shape: ");
+        // for(int i=0; i < output_node_dims_1.size(); i++)
+        // {
+        //     printf("  %ld  ", output_node_dims_1[i]);
+        // }
+        // printf("\n");
+        float *outarr1 = output_tensors_pnet[1].GetTensorMutableData<float>();
+        //printf("tensor_size_1: %d \n", (int)tensor_size_1);
+        vector<float> out1{outarr1, outarr1 + tensor_size_1};
+        printf("out0_size: %d \n", (int)out1.size());
+        
+        //1-Y nosoftmax
+        //printf("----------------1-Y------------------\n");
+        //printf("Output %s:\n", m_PNetOutputNodeNames[2]);
+        Ort::TypeInfo type_info_2 = output_tensors_pnet[2].GetTypeInfo();
+        auto tensor_info_2 = type_info_2.GetTensorTypeAndShapeInfo();
+        size_t tensor_size_2 = tensor_info_2.GetElementCount();
+        vector<int64_t>  output_node_dims_2 = tensor_info_2.GetShape();
+        //printf("output_node_dims_2: %d \n", (int)output_node_dims_2.size());
+        // printf("output_node_dims_2 shape: ");
+        // for(int i=0; i < output_node_dims_2.size(); i++)
+        // {
+        //     printf("  %ld  ", output_node_dims_2[i]);
+        // }
+        // printf("\n");
+        float *outarr2 = output_tensors_pnet[2].GetTensorMutableData<float>();
+        printf("tensor_size_2: %d \n", (int)tensor_size_2);
+        vector<float> out2{outarr2, outarr2 + tensor_size_2};
+
+        softmax(out2);
+
         vector<BoundingBox> filterOutBoxes;
         vector<BoundingBox> nmsOutBoxes;
-        //vector<BoundingBox> filterOutRegs;
-        generateBoundingBox(regs, box_shape, cls, cls_shape, cur_scale, P_thres, filterOutBoxes);
-        nms_cpu(filterOutBoxes, 0.5, UNION, nmsOutBoxes);
+        generateBoundingBox(out0, output_node_dims_0, out2, output_node_dims_2, scale, P_thres, filterOutBoxes);
+        printf("-------filterOutBoxes.size(): %d\n", (int)filterOutBoxes.size());
+        nmsOutBoxes = nms(filterOutBoxes, 0.5, UNION);
+        printf("-------nmsOutBoxes.size(): %d\n", (int)nmsOutBoxes.size());
         if(nmsOutBoxes.size() > 0)
+        {
             totalBoxes.insert(totalBoxes.end(), nmsOutBoxes.begin(), nmsOutBoxes.end());
+            printf("======1=====>totalBoxes.size(): %d\n", (int)totalBoxes.size());
+        }
+
     }
 
     //do global nms operator
@@ -486,10 +438,9 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
     {
         vector<BoundingBox> globalFilterBoxes;
         //cout<<totalBoxes.size()<<endl;
-        nms_cpu(totalBoxes, 0.7, UNION, globalFilterBoxes);
+        globalFilterBoxes = nms(totalBoxes, 0.7, UNION);
         //cout<<globalFilterBoxes.size()<<endl;
         totalBoxes.clear();
-        cout<<totalBoxes.size()<<endl;
         for(int i = 0; i < globalFilterBoxes.size(); i ++)
         {
             float regw = globalFilterBoxes[i].y2 - globalFilterBoxes[i].y1 ;
@@ -508,79 +459,235 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             x2 = x1 + l;
             y2 = y1 + l;
             box.x1 = x1, box.x2 = x2, box.y1 = y1, box.y2 = y2;
+            //printf("===%d===box.x1: %f; box.x2: %f; box.y1: %f; box.y2: %f\n", i, box.x1, box.x2, box.y1, box.y2);
             totalBoxes.push_back(box);
         }
     }
 
+#ifdef IMAGE_DEBUG
+    cv::Mat m_tmp = img.t();
+    for(int k = 0; k < totalBoxes.size(); k++)
+    {
+        cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
+    }
+    imwrite("wytFace_Pnet_Out.jpg", m_tmp.t());
+#endif
+
     //the second stage: R-Net
     if(totalBoxes.size() > 0)
     {
-        vector<cv::Mat> n_channels;
-        Blob<float>* input_layer = R_Net->input_blobs()[0];
-        input_layer->Reshape(totalBoxes.size(), num_channels_, 24, 24);
-        R_Net->Reshape();
-        wrapInputLayer(R_Net, &n_channels);
-        //fillout n_channels
-        buildInputChannels(sample_norm_channels, totalBoxes, cv::Size(24,24), &n_channels);
-        //R_Net forward
-        R_Net->Forward();
-        /*copy output layer to vector*/
-        Blob<float>* output_layer0 = R_Net->output_blobs()[0];
-        vector<int> box_shape = output_layer0->shape();
-        int output_size = box_shape[0] * box_shape[1];
-        const float* begin0 = output_layer0->cpu_data();
-        const float* end0 = output_size + begin0;
-        vector<float> regs(begin0, end0);
-        
-        Blob<float>* output_layer1 = R_Net->output_blobs()[1];
-        vector<int> cls_shape = output_layer1->shape();
-        output_size = cls_shape[0] * cls_shape[1];
-        const float* begin1 = output_layer1->cpu_data();
-        const float* end1 = output_size + begin1;
-        vector<float> cls(begin1, end1);
+        int batch = totalBoxes.size();
+        int channel = 3;
+        int height_r = 24;
+        int width_r = 24;
 
+        std::array<int64_t, 4> input_shape_{ 1, channel, height_r, width_r };
+
+        vector<int64_t>  output_node_dims_0;
+        vector<int64_t>  output_node_dims_1;
+        vector<float> out0;
+        vector<float> out1;
+
+        Padding(totalBoxes, img_W, img_H);
+        for (int i = 0; i < batch; i++)
+        {
+            printf("==============batch===%d=========>\n", i);
+            size_t input_tensor_size = 1 * channel * height_r * width_r;
+            std::vector<float> input_image_(input_tensor_size);
+
+            float *input_data = input_image_.data();
+            fill(input_image_.begin(), input_image_.end(), 0.f);
+
+            copy_one_patch(sample, totalBoxes[i], input_data, cv::Size(height_r, width_r), i,  "R");
+            // printf("input_data: \n");
+            // for (int j = 0; j < input_tensor_size; j ++)
+            // {
+            //     printf(" %f ", input_data[j]);
+            // }
+            // printf("\n");
+            // //return 0;
+
+            // create input tensor object from data values
+            Ort::Value input_tensor_rnet = Ort::Value::CreateTensor<float>(memory_info, input_image_.data(), input_image_.size(), input_shape_.data(), input_shape_.size());
+
+            auto output_tensors_rnet = session_Rnet.Run(Ort::RunOptions{nullptr}, m_RNetInputNodeNames.data(), &input_tensor_rnet, 1, m_RNetOutputNodeNames.data(), m_RNetOutputNodeNames.size());
+            // printf("output_tensors_rnet.size: [%d]\n", (int)output_tensors_rnet.size());
+
+            //conv5-2_Gemm_Y
+            //printf("---------------conv5-2_Gemm_Y-------------------\n");
+            //printf("Output %s:\n", m_RNetOutputNodeNames[0]);
+            Ort::TypeInfo type_info_0 = output_tensors_rnet[0].GetTypeInfo();
+            auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
+            size_t tensor_size_0 = tensor_info_0.GetElementCount();
+            vector<int64_t>  m_vecOut0 = tensor_info_0.GetShape();
+            for (auto it : m_vecOut0)
+                output_node_dims_0.push_back(it);
+
+            float *outarr0 = output_tensors_rnet[0].GetTensorMutableData<float>();
+            printf("tensor_size_0: %d \n", (int)tensor_size_0);
+            //printf("pos: \n");
+            for (int j = 0; j < tensor_size_0; j++)
+            {
+                out0.push_back(outarr0[j]);
+                //printf(" %f ", outarr0[j]);
+            }
+            //printf("\n");
+
+            //prob1_Y
+            //printf("----------------prob1_Y------------------\n");
+            //printf("Output %s:\n", m_RNetOutputNodeNames[1]);
+            Ort::TypeInfo type_info_1 = output_tensors_rnet[1].GetTypeInfo();
+            auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
+            size_t tensor_size_1 = tensor_info_1.GetElementCount();
+            vector<int64_t>  m_vecOut1 = tensor_info_1.GetShape();
+            for (auto it : m_vecOut1)
+            {
+                output_node_dims_1.push_back(it);
+            }
+
+            float *outarr1 = output_tensors_rnet[1].GetTensorMutableData<float>();
+            //printf("tensor_size_1: %d \n", (int)tensor_size_1);
+            //printf("score: \n");
+            for (int j = 0; j < tensor_size_1; j++)
+            {
+                out1.push_back(outarr1[j]);
+                //printf(" %f ", outarr1[j]);
+            }
+            //printf("\n");
+        }
         vector<BoundingBox> filterOutBoxes;
-        filteroutBoundingBox(totalBoxes, regs, box_shape, cls, cls_shape, vector<float>(), vector<int>(), R_thres, filterOutBoxes);
-        nms_cpu(filterOutBoxes, 0.7, UNION, totalBoxes);
+        filteroutBoundingBox(totalBoxes, out0, output_node_dims_0, out1, output_node_dims_1, vector<float>(), vector<int64_t>(), R_thres, filterOutBoxes);
+        printf("filterOutBoxes.size = %zu \n", filterOutBoxes.size());
+        totalBoxes.clear();
+        totalBoxes = nms(filterOutBoxes, 0.7, UNION);
+        printf("totalBoxes.size = %zu \n", totalBoxes.size());
+
+#ifdef IMAGE_DEBUG
+        cv::Mat m_tmp = img.t();
+        for(int k = 0; k < totalBoxes.size(); k++)
+        {
+            cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
+        }
+        imwrite("wytFace_Rnet_Out.jpg", m_tmp.t());
+#endif
     }
 
     // do third stage: O-Net
     if(totalBoxes.size() > 0)
     {
-        vector<cv::Mat> n_channels;
-        Blob<float>* input_layer = O_Net->input_blobs()[0];
-        input_layer->Reshape(totalBoxes.size(), num_channels_, 48, 48);
-        O_Net->Reshape();
-        wrapInputLayer(O_Net, &n_channels);
-        //fillout n_channels
-        buildInputChannels(sample_norm_channels, totalBoxes, cv::Size(48,48), &n_channels);
-        //O_Net forward
-        O_Net->Forward();
-        /*copy output layer to vector*/
-        Blob<float>* output_layer0 = O_Net->output_blobs()[0];
-        vector<int> box_shape = output_layer0->shape();
-        int output_size = box_shape[0] * box_shape[1];
-        const float* begin0 = output_layer0->cpu_data();
-        const float* end0 = output_size + begin0;
-        vector<float> regs(begin0, end0);
-        
-        Blob<float>* output_layer1 = O_Net->output_blobs()[1];
-        vector<int> points_shape = output_layer1->shape();
-        output_size = points_shape[0] * points_shape[1];
-        const float* begin1 = output_layer1->cpu_data();
-        const float* end1 = output_size + begin1;
-        vector<float> points(begin1, end1);
-        
-        Blob<float>* output_layer2 = O_Net->output_blobs()[2];
-        vector<int> cls_shape = output_layer2->shape();
-        output_size = cls_shape[0] * cls_shape[1];
-        const float* begin2 = output_layer2->cpu_data();
-        const float* end2 = output_size + begin2;
-        vector<float> cls(begin2, end2);
-        
+        int batch = totalBoxes.size();
+        int channel = 3;
+        int height_o = 48;
+        int width_o = 48;
+
+        std::array<int64_t, 4> input_shape_{ 1, channel, height_o, width_o };
+
+        vector<int64_t>  output_node_dims_0;
+        vector<int64_t>  output_node_dims_1;
+        vector<int64_t>  output_node_dims_2;
+        vector<float> out0;
+        vector<float> out1;
+        vector<float> out2;
+
+        Padding(totalBoxes, img_W, img_H);
+        for (int i = 0; i < batch; i++)
+        {
+            printf("==============batch===%d=========>\n", i);
+            size_t input_tensor_size = 1 * channel * height_o * width_o;
+            std::vector<float> input_image_(input_tensor_size);
+
+            float *input_data = input_image_.data();
+            fill(input_image_.begin(), input_image_.end(), 0.f);
+
+            copy_one_patch(sample, totalBoxes[i], input_data, cv::Size(height_o, width_o), i, "O");
+
+            // create input tensor object from data values
+            Ort::Value input_tensor_onet = Ort::Value::CreateTensor<float>(memory_info, input_image_.data(), input_image_.size(), input_shape_.data(), input_shape_.size());
+
+            auto output_tensors_onet = session_Onet.Run(Ort::RunOptions{nullptr}, m_ONetInputNodeNames.data(), &input_tensor_onet, m_ONetInputNodeNames.size(), m_ONetOutputNodeNames.data(), m_ONetOutputNodeNames.size());
+
+            //conv6-2_Gemm_Y  boxes
+            printf("---------------conv6-2_Gemm_Y-------------------\n");
+            printf("Output %s:\n", m_ONetOutputNodeNames[0]);
+            Ort::TypeInfo type_info_0 = output_tensors_onet[0].GetTypeInfo();
+            auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
+            size_t tensor_size_0 = tensor_info_0.GetElementCount();
+            vector<int64_t>  m_vecOut0 = tensor_info_0.GetShape();
+            for (auto it : m_vecOut0)
+            {
+                output_node_dims_0.push_back(it);
+            }
+
+            float *outarr0 = output_tensors_onet[0].GetTensorMutableData<float>();
+            printf("tensor_size_0: %d \n", (int)tensor_size_0);
+            printf("conv6-2_Gemm_Y boxes: \n");
+            for (int j = 0; j < tensor_size_0; j++)
+            {
+                out0.push_back(outarr0[j]);
+                printf(" %f ", outarr0[j]);
+            }
+            printf("\n");
+
+            // conv6-3_Gemm_Y landmark
+            printf("----------------conv6-3_Gemm_Y------------------\n");
+            printf("Output %s:\n", m_ONetOutputNodeNames[1]);
+            Ort::TypeInfo type_info_1 = output_tensors_onet[1].GetTypeInfo();
+            auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
+            size_t tensor_size_1 = tensor_info_1.GetElementCount();
+            vector<int64_t>  m_vecOut1 = tensor_info_1.GetShape();
+            for (auto it : m_vecOut1)
+            {
+                output_node_dims_1.push_back(it);
+            }
+
+            float *outarr1 = output_tensors_onet[1].GetTensorMutableData<float>();
+            printf("tensor_size_1: %d \n", (int)tensor_size_1);
+            printf("conv6-3_Gemm_Y landmark: \n");
+            for (int j = 0; j < tensor_size_1; j++)
+            {
+                out1.push_back(outarr1[j]);
+                printf(" %f ", outarr1[j]);
+            }
+            printf("\n");
+
+            // prob1_Y prob
+            printf("----------------prob1_Y------------------\n");
+            printf("Output %s:\n", m_ONetOutputNodeNames[2]);
+            Ort::TypeInfo type_info_2 = output_tensors_onet[2].GetTypeInfo();
+            auto tensor_info_2 = type_info_2.GetTensorTypeAndShapeInfo();
+            size_t tensor_size_2 = tensor_info_2.GetElementCount();
+            vector<int64_t>  m_vecOut2 = tensor_info_2.GetShape();
+            for (auto it : m_vecOut2)
+            {
+                output_node_dims_2.push_back(it);
+            }
+            
+            float *outarr2 = output_tensors_onet[2].GetTensorMutableData<float>();
+            printf("tensor_size_2: %d \n", (int)tensor_size_2);
+            printf("prob1_Y prob: \n");
+            for (int j = 0; j < tensor_size_2; j++)
+            {
+                out2.push_back(outarr2[j]);
+                printf(" %f ", outarr2[j]);
+            }
+            printf("\n==================end=================\n");
+        }
+
         vector<BoundingBox> filterOutBoxes;
-        filteroutBoundingBox(totalBoxes, regs, box_shape, cls, cls_shape, points, points_shape, O_thres, filterOutBoxes);
-        nms_cpu(filterOutBoxes, 0.7, MIN, totalBoxes);
+        filteroutBoundingBox(totalBoxes, out0, output_node_dims_0, out2, output_node_dims_2, out1, output_node_dims_1, O_thres, filterOutBoxes);
+        printf("filterOutBoxes.size = %zu \n", filterOutBoxes.size());
+        totalBoxes.clear();
+        totalBoxes = nms(filterOutBoxes, 0.7, MIN);
+        printf("totalBoxes.size = %zu \n", totalBoxes.size());
+
+#ifdef IMAGE_DEBUG
+        cv::Mat m_tmp = img.t();
+        for(int k = 0; k < totalBoxes.size(); k++)
+        {
+            cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
+        }
+        imwrite("wytFace_Onet_Out.jpg", m_tmp.t());
+#endif
     }
 
     for(int i = 0; i < totalBoxes.size(); i++)

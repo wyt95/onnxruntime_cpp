@@ -27,6 +27,8 @@ using namespace cv;
 #define YKX_FAILED      1
 #define YKX_PARAM_ERROR 2
 
+Ort::Env env{ ORT_LOGGING_LEVEL_WARNING, "test" };
+
 void readFileList(const char* basePath, vector<string>& imgFiles)
 {
     DIR *dir;
@@ -79,6 +81,23 @@ void readFileList(const char* basePath, vector<string>& imgFiles)
     closedir(dir);
 }
 
+template <typename T>
+static void softmax(T& input) {
+    float rowmax = *std::max_element(input.begin(), input.end());
+    std::vector<float> y(input.size());
+    
+    for (size_t i = 0; i != input.size(); ++i) {
+        /*sum += */y[i] = std::exp(input[i] /*- rowmax*/);
+    }
+
+    float sum = 0.0f;
+    for (size_t i = 0; i < input.size()/2; ++i) {
+        sum = y[i] + y[i + input.size()/2];
+        input[i] = y[i] / sum;
+        input[i + input.size()/2] = y[ i + input.size()/2] / sum;
+    }
+}
+
 class FaceDetector
 {
 public:
@@ -116,6 +135,9 @@ public:
         //regression
         float dx1, dy1;
         float dx2, dy2;
+        //padding stuff
+        int px1, py1;
+        int px2, py2;
         //cls
         float score;
         //inner points
@@ -173,7 +195,7 @@ private:
     std::mutex m_onnx_mutex;
 
 public:
-    FaceDetector(std::vector<string> model_dir, const MODEL_VERSION model_version);
+    FaceDetector(std::vector<string> model_dir/*, const MODEL_VERSION model_version*/);
 
     ~FaceDetector();
     
@@ -181,7 +203,7 @@ public:
                                     int min_size = 20, float P_thres = 0.6, float R_thres = 0.7, float O_thres =0.7,\
                                          bool is_fast_resize = true, float scale_factor = 0.709);
 
-    //获取模型输入输出信息
+    //Get model I/O info.
     int64_t GetOnnxModelInfo(std::vector<string> model_dir);
 
     void GetOnnxModelInputInfo(Ort::Session& session_net, std::vector<const char*> &input_node_names, std::vector<const char*> &output_node_names);
@@ -198,13 +220,13 @@ private:
                               const vector<float>& cls, const vector<int>& cls_shape,
                               const vector< float >& points, const vector< int >& points_shape,
                               float threshold, vector<BoundingBox>& filterOutBoxes);
-    void nms_cpu(vector<BoundingBox>& boxes, float threshold, NMS_TYPE type, vector<BoundingBox>& filterOutBoxes);
 
-    void pad(vector<BoundingBox>& boxes, int imgW, int imgH);
+    float iou(BoundingBox box1, BoundingBox box2, NMS_TYPE type);
+    vector<BoundingBox> nms(std::vector<BoundingBox>& vec_boxs, float threshold, NMS_TYPE type);
 
-    void pyrDown(const vector<cv::Mat>& img_channels,float scale, std::vector<cv::Mat>* input_channels);
-    void buildInputChannels(const std::vector<cv::Mat>& img_channels, const std::vector<BoundingBox>& boxes,
-                            const cv::Size& target_size, std::vector<cv::Mat>* input_channels);
+    void Padding(vector<BoundingBox> &totalBoxes, int img_w, int img_h);
+
+    void copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int i, const char *p_str);
 };
 
 #endif
