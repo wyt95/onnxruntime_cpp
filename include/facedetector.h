@@ -206,7 +206,11 @@ public:
     //Get model I/O info.
     int64_t GetOnnxModelInfo(std::vector<string> model_dir);
 
-    void GetOnnxModelInputInfo(Ort::Session& session_net, std::vector<const char*> &input_node_names, std::vector<const char*> &output_node_names);
+    void GetOnnxModelInputInfo(Ort::Session& session_net, 
+                               std::vector<const char*> &input_node_names, 
+                               std::vector<int64_t> &input_node_dims, 
+                               std::vector<const char*> &output_node_names, 
+                               std::vector<int64_t> &output_node_dims);
 
     void Release();
 
