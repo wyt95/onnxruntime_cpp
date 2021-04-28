@@ -325,7 +325,7 @@ void GetOnnxModelInputInfo(Ort::Session& session_net, std::vector<const char*> &
 
 }
 
-void copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int i, const char *p_str)
+void copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int idx, const char *p_str)
 {
     cv::Mat copy_img = img.clone();
     cv::Mat chop_img;
@@ -334,16 +334,7 @@ void copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, 
     int width = target_size.width;
     float src_height = abs(input_box.px1 - input_box.px2);
     float src_width = abs(input_box.py1 - input_box.py2);
-    printf("src_height:%f, src_width:%f\n", src_height, src_width);
-    printf("===%d===px1: %d; px2: %d; py1: %d; py2: %d\n", i, input_box.px1, input_box.px2, input_box.py1, input_box.py2);
-
     chop_img = copy_img(cv::Range(input_box.px1, input_box.px2), cv::Range(input_box.py1, input_box.py2));
-
-    // if (p_str == "R")
-    // {
-    //     string PicName_2 = "padface" + std::to_string(i) + "_" + std::to_string(i) + ".jpg";
-    //     cv::imwrite(PicName_2, chop_img);
-    // }
 
     chop_img.convertTo( chop_img, CV_32FC3, 0.0078125, -127.5 * 0.0078125);
 	cv::resize(chop_img, chop_img, cv::Size(width, height));
@@ -598,8 +589,6 @@ int main()
         int height_r = 24;
         int width_r = 24;
 
-        float rnet_threshold=0.7;
-
         std::string m_rModel_dir = "./optimaizer_rnet.onnx";
         Ort::Session session_rnet(env, m_rModel_dir.c_str(), session_option);
         std::vector<const char*> m_RNetInputNodeNames;
@@ -623,13 +612,6 @@ int main()
             fill(input_image_.begin(), input_image_.end(), 0.f);
 
             copy_one_patch(sample, totalBoxes[i], input_data, cv::Size(24, 24), i,  "R");
-            // printf("input_data: \n");
-            // for (int j = 0; j < input_tensor_size; j ++)
-            // {
-            //     printf(" %f ", input_data[j]);
-            // }
-            // printf("\n");
-            // //return 0;
 
             // create input tensor object from data values
             Ort::Value input_tensor_rnet = Ort::Value::CreateTensor<float>(memory_info, input_image_.data(), input_image_.size(), input_shape_.data(), input_shape_.size());
@@ -649,13 +631,10 @@ int main()
 
             float *outarr0 = output_tensors_rnet[0].GetTensorMutableData<float>();
             printf("tensor_size_0: %d \n", (int)tensor_size_0);
-            //printf("pos: \n");
             for (int j = 0; j < tensor_size_0; j++)
             {
                 out0.push_back(outarr0[j]);
-                //printf(" %f ", outarr0[j]);
             }
-            //printf("\n");
 
             //prob1_Y
             //printf("----------------prob1_Y------------------\n");
@@ -670,14 +649,12 @@ int main()
             }
 
             float *outarr1 = output_tensors_rnet[1].GetTensorMutableData<float>();
-            //printf("tensor_size_1: %d \n", (int)tensor_size_1);
-            //printf("score: \n");
             for (int j = 0; j < tensor_size_1; j++)
             {
                 out1.push_back(outarr1[j]);
-                //printf(" %f ", outarr1[j]);
+
             }
-            //printf("\n");
+
         }
 
         vector<BoundingBox> filterOutBoxes;
@@ -702,8 +679,6 @@ int main()
         int channel = 3;
         int height_r = 48;
         int width_r = 48;
-
-        float rnet_threshold=0.7;
 
         std::string m_oModel_dir = "./optimaizer_onet.onnx";
         Ort::Session session_onet(env, m_oModel_dir.c_str(), session_option);

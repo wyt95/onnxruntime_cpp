@@ -1,36 +1,60 @@
-#include <iostream>
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
-#include <opencv2/imgproc/types_c.h>
-#include <unistd.h>
-#include <vector>
-#include <array>
-#include <stdlib.h>
-#include <assert.h>
-#include <cmath>
-#include <algorithm>
-#include <string.h>
 #include "facedetector.h"
 
-#include <onnxruntime_cxx_api.h>
-#include <cpu_provider_factory.h>
-
+void readFileList(const char* basePath, vector<string>& imgFiles)
+{
+    DIR *dir;
+    struct dirent *ptr;
+    char base[1000];
+    
+    if( (dir=opendir(basePath)) == NULL)
+    {
+        return ;
+    }
+    
+    while( (ptr = readdir(dir)) != NULL)
+    {
+        if(strcmp(ptr->d_name,".") == 0 ||
+            strcmp(ptr->d_name, "..") == 0)
+            continue;
+        else if(ptr->d_type == 8)//file 
+        {
+            int len = strlen(ptr->d_name);
+            if((strstr(ptr->d_name, "jpg") != NULL) || (strstr(ptr->d_name, "jpeg") != NULL))
+            {
+                memset(base, '\0', sizeof(base));
+                strcpy(base, basePath);
+                strcat(base, "/");
+                strcat(base, ptr->d_name);
+                imgFiles.push_back(base);
+                cout << "base:" << base << endl;
+            }
+            cout << "ptr->d_name:" << ptr->d_name << endl;
+            cout << "imgFiles:" << imgFiles.size() << endl;
+        }
+    }
+    closedir(dir);
+}
 
 int main(int argc, char **argv)
 {
-    vector<string> model_path{"/mnt/share/code/onnxruntime_cpp/bin/optimaizer_pnet.onnx", 
-                            "/mnt/share/code/onnxruntime_cpp/bin/optimaizer_rnet.onnx",
-                            "/mnt/share/code/onnxruntime_cpp/bin/optimaizer_onet.onnx"};
-     FaceDetector fd(model_path);
+    vector<string> model_path{"/mnt/share/onnxruntime_cpp/bin/optimaizer_pnet.onnx", 
+                            "/mnt/share/onnxruntime_cpp/bin/optimaizer_rnet.onnx",
+                            "/mnt/share/onnxruntime_cpp/bin/optimaizer_onet.onnx"};
+    cout << "model_path :" << model_path.size() << endl;
+    FaceDetector *fd = new FaceDetector(model_path);
+    cout << "FaceDetector Init()....." << endl;
+    fd->Init();
     
     vector<string> imgList;
-    readFileList("/mnt/share/code/onnxruntime_cpp/bin/face/", imgList);
+    cout << "start readFileList....." << endl;
+    readFileList("./face/", imgList);
+    cout << "start anylyis....." << endl;
+    cout << "imgList size : " << imgList.size() << endl;
     for(int i = 0; i < imgList.size(); i ++)
     {
         cv::Mat testImg = cv::imread(imgList[i]);
         
-        vector<FaceDetector::BoundingBox> res = fd.Detect(testImg, FaceDetector::BGR, FaceDetector::ORIENT_UP ,20, 0.6, 0.7, 0.7);
+        vector<FaceDetector::BoundingBox> res = fd->Detect(testImg, FaceDetector::BGR, FaceDetector::ORIENT_UP ,20, 0.6, 0.7, 0.7);
         cout<< "detected face NUM : " << res.size() << endl;
         for(int k = 0; k < res.size(); k++)
         {
@@ -41,5 +65,6 @@ int main(int argc, char **argv)
         string picName = "test" + to_string(i) + ".jpg";
         cv::imwrite(picName, testImg);
     }
+    cout << "end anylyis....." << endl;
     return 0;
 }

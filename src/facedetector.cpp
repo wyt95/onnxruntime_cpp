@@ -1,16 +1,9 @@
-#include <facedetector.h>
+#include "facedetector.h"
 
-FaceDetector::FaceDetector(std::vector<string> model_dir/*, const MODEL_VERSION model_version*/)
+FaceDetector::FaceDetector(std::vector<string> model_dir)
 {
-    session_option.SetIntraOpNumThreads(1);
-    session_option.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
-    memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeCPU);
-
-    if (YKX_SUCCESS != GetOnnxModelInfo(model_dir))
-    {
-        printf("ModelInit failed!!!\n");
-        return;
-    }
+    m_model_dir.assign(model_dir.begin(), model_dir.end());
+    cout << "m_model_dir :" << m_model_dir.size() << endl;
 
     num_channels_ = 3;
     //set img_mean
@@ -24,9 +17,21 @@ FaceDetector::~FaceDetector()
     //Release();
 }
 
-void FaceDetector::Release()
+void FaceDetector::Init()
 {
-    ;
+    cout << "Init()......" << endl;
+    m_OrtEnv = std::make_unique<Ort::Env>(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "test"));
+
+    session_option.SetIntraOpNumThreads(1);
+    session_option.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+
+    m_OrtEnv = std::make_unique<Ort::Env>(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "test"));
+    
+    if (YKX_SUCCESS != GetOnnxModelInfo(m_model_dir))
+    {
+        printf("ModelInit failed!!!\n");
+        return;
+    }
 }
 
 void FaceDetector::copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int idx, const char *p_str)
@@ -38,10 +43,6 @@ void FaceDetector::copy_one_patch(const cv::Mat& img, BoundingBox& input_box, fl
     int width = target_size.width;
     float src_height = abs(input_box.px1 - input_box.px2);
     float src_width = abs(input_box.py1 - input_box.py2);
-#ifdef IMAGE_DEBUG
-    printf("src_height:%f, src_width:%f\n", src_height, src_width);
-    printf("===%d===px1: %d; px2: %d; py1: %d; py2: %d\n", idx, input_box.px1, input_box.px2, input_box.py1, input_box.py2);
-#endif
     chop_img = copy_img(cv::Range(input_box.px1, input_box.px2), cv::Range(input_box.py1, input_box.py2));
 
     chop_img.convertTo( chop_img, CV_32FC3, 0.0078125, -127.5 * 0.0078125);
@@ -56,8 +57,8 @@ void FaceDetector::copy_one_patch(const cv::Mat& img, BoundingBox& input_box, fl
     }
 }
 
-void FaceDetector::generateBoundingBox(const vector<float>& boxRegs, const vector<int>& box_shape,
-                             const vector<float>& cls, const vector<int>& cls_shape,
+void FaceDetector::generateBoundingBox(const vector<float>& boxRegs, const vector<int64_t>& box_shape,
+                             const vector<float>& cls, const vector<int64_t>& cls_shape,
                              float scale, float threshold, vector<BoundingBox>& filterOutBoxes
                             )
 {
@@ -94,16 +95,12 @@ void FaceDetector::generateBoundingBox(const vector<float>& boxRegs, const vecto
 }
 
 void FaceDetector::filteroutBoundingBox(const vector< FaceDetector::BoundingBox >& boxes, 
-                                        const vector< float >& boxRegs, const vector< int >& box_shape, 
-                                        const vector< float >& cls, const vector< int >& cls_shape, 
-                                        const vector< float >& points, const vector< int >& points_shape,
+                                        const vector< float >& boxRegs, const vector< int64_t >& box_shape, 
+                                        const vector< float >& cls, const vector< int64_t >& cls_shape, 
+                                        const vector< float >& points, const vector< int64_t >& points_shape,
                                         float threshold, vector< FaceDetector::BoundingBox >& filterOutBoxes)
 {
     filterOutBoxes.clear();
-    if(points.size() > 0)
-    {
-        assert(points_shape[0] == boxes.size() && points_shape[1] == 10);
-    }
 
     for(int i = 0; i < boxes.size(); i ++)
     {
@@ -163,7 +160,7 @@ float FaceDetector::iou(BoundingBox box1, BoundingBox box2, NMS_TYPE type)
     return iou; 
 }
 
-vector<BoundingBox> FaceDetector::nms(std::vector<BoundingBox>& vec_boxs, float threshold, NMS_TYPE type) 
+vector<FaceDetector::BoundingBox> FaceDetector::nms(std::vector<BoundingBox>& vec_boxs, float threshold, NMS_TYPE type) 
 { 
     vector<BoundingBox> results; 
     while(vec_boxs.size() > 0)
@@ -185,11 +182,11 @@ vector<BoundingBox> FaceDetector::nms(std::vector<BoundingBox>& vec_boxs, float 
     return results;
 } 
 
-void FaceDetector::GetOnnxModelInputInfo(Ort::Session& session_net, 
+void FaceDetector::GetOnnxModelInputInfo(Ort::Session &session_net, 
                                             std::vector<const char*> &input_node_names, 
-                                            std::vector<int64_t> &input_node_dims, 
+                                            vector<vector<int64_t> > &input_node_dims, 
                                             std::vector<const char*> &output_node_names, 
-                                            std::vector<int64_t> &output_node_dims)
+                                            vector<vector<int64_t> > &output_node_dims)
 {
     size_t num_input_nodes = session_net.GetInputCount();
     input_node_names.resize(num_input_nodes);
@@ -199,7 +196,7 @@ void FaceDetector::GetOnnxModelInputInfo(Ort::Session& session_net,
     // print model input layer (node names, types, shape etc.)
     Ort::AllocatorWithDefaultOptions allocator;
 
-    printf("Number of inputs = %zu\n", num_input_nodes);
+    std::cout << "Number of inputs :" << num_input_nodes << std::endl;
     // iterate over all input nodes
     for (int i = 0; i < num_input_nodes; i++) 
     {
@@ -216,14 +213,13 @@ void FaceDetector::GetOnnxModelInputInfo(Ort::Session& session_net,
         printf("Input %d : type=%d\n", i, type);
 
         // print input shapes/dims
-        input_node_dims = tensor_info.GetShape();
-        printf("Input %d : num_dims=%zu\n", i, input_node_dims.size());
-        for (int j = 0; j < input_node_dims.size(); j++)
+        std::vector<int64_t> inputNodeDims = tensor_info.GetShape();
+        printf("Input %d : num_dims=%zu\n", i, inputNodeDims.size());
+        for (int j = 0; j < inputNodeDims.size(); j++)
         {
-            printf("Input %d : dim %d=%jd\n", i, j, input_node_dims[j]);
+            printf("Input %d : dim %d=%jd\n", i, j, inputNodeDims[j]);
         }
-
-        //allocator.Free(input_name);
+        input_node_dims.push_back(inputNodeDims);
     }
 
     size_t num_output_nodes = session_net.GetOutputCount();
@@ -245,14 +241,13 @@ void FaceDetector::GetOnnxModelInputInfo(Ort::Session& session_net,
         auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
 
         // print output shapes/dims
-        output_node_dims = tensor_info.GetShape();
-        printf("output %d : num_dims=%zu\n", i, output_node_dims.size());
-        for (int j = 0; j < output_node_dims.size(); j++)
+        std::vector<int64_t> outputNodeDims = tensor_info.GetShape();
+        printf("output %d : num_dims=%zu\n", i, outputNodeDims.size());
+        for (int j = 0; j < outputNodeDims.size(); j++)
         {
-            printf("output %d : dim %d=%jd\n", i, j, output_node_dims[j]);
+            printf("output %d : dim %d=%jd\n", i, j, outputNodeDims[j]);
         }
-
-       //allocator.Free(output_name);
+        output_node_dims.push_back(outputNodeDims);
     }
 
 }
@@ -261,7 +256,7 @@ int64_t FaceDetector::GetOnnxModelInfo(std::vector<string> model_dir)
 {
     if (model_dir.empty())
     {
-        printf("model_dir empty, please check it!!!\n");
+        cout << "model_dir empty, please check it!!!" << endl;
         return YKX_PARAM_ERROR;
     }
 
@@ -272,17 +267,30 @@ int64_t FaceDetector::GetOnnxModelInfo(std::vector<string> model_dir)
 
     /* load three networks */
     //p
-    session_PNet(env, m_pModel_dir.c_str(), session_option);
+    session_PNet = std::make_unique<Ort::Session>(Ort::Session(*m_OrtEnv, m_pModel_dir.c_str(), session_option));
     //R
-    session_RNet(env, m_rModel_dir.c_str(), session_option);
+    session_RNet = std::make_unique<Ort::Session>(Ort::Session(*m_OrtEnv, m_rModel_dir.c_str(), session_option));
     //O
-    session_ONet(env, m_oModel_dir.c_str(), session_option);
+    session_ONet = std::make_unique<Ort::Session>(Ort::Session(*m_OrtEnv, m_oModel_dir.c_str(), session_option));
 
-    GetOnnxModelInputInfo(session_PNet, m_PNetInputNodeNames, m_PNetInputNodesDims, m_PNetOutputNodeNames, m_PNetOutputNodesDims);
-    GetOnnxModelInputInfo(session_RNet, m_RNetInputNodeNames, m_RNetInputNodesDims, m_RNetOutputNodeNames, m_RNetOutputNodesDims);
-    GetOnnxModelInputInfo(session_ONet, m_ONetInputNodeNames, m_ONetInputNodesDims, m_ONetOutputNodeNames, m_ONetOutputNodesDims);
+    GetOnnxModelInputInfo(*session_PNet, m_PNetInputNodeNames, m_PNetInputNodesDims, m_PNetOutputNodeNames, m_PNetOutputNodesDims);
+    GetOnnxModelInputInfo(*session_RNet, m_RNetInputNodeNames, m_RNetInputNodesDims, m_RNetOutputNodeNames, m_RNetOutputNodesDims);
+    GetOnnxModelInputInfo(*session_ONet, m_ONetInputNodeNames, m_ONetInputNodesDims, m_ONetOutputNodeNames, m_ONetOutputNodesDims);
 
     return YKX_SUCCESS;
+}
+
+// compute the padding coordinates (pad the bounding boxes to square)
+void FaceDetector::Padding(vector<BoundingBox> &totalBoxes, int img_w, int img_h)
+{
+    for(int i = 0;i < totalBoxes.size(); i++)
+    {
+        totalBoxes[i].py2 = int((totalBoxes[i].y2 >= img_w) ? img_w : totalBoxes[i].y2);
+        totalBoxes[i].px2 = int((totalBoxes[i].x2 >= img_h) ? img_h : totalBoxes[i].x2);
+        totalBoxes[i].py1 = int((totalBoxes[i].y1 < 1) ? 1 : totalBoxes[i].y1);
+        totalBoxes[i].px1 = int((totalBoxes[i].x1 < 1) ? 1 : totalBoxes[i].x1);
+        //printf("===%d===px1: %d; px2: %d; py1: %d; py2: %d\n", i, totalBoxes[i].px1, totalBoxes[i].px2, totalBoxes[i].py1, totalBoxes[i].py2);
+    }
 }
 
 //#define IMAGE_DEBUG
@@ -323,6 +331,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
     }
     /*stage 1: P_Net forward can get rectangle and regression */
     vector<BoundingBox> totalBoxes;
+    auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeCPU);
     for (auto cur_scale : all_scales)
     {
 
@@ -333,9 +342,9 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         //convert to float and normalize
         OutputPic.convertTo( OutputPic_2, CV_32FC3, 0.0078125, -127.5 * 0.0078125);
         //对输入的形状进行变化
-        size_t input_tensor_size = 1 * hs * ws * 3;
+        size_t input_tensor_size = 1 * 3 * ws * hs;
         std::vector<float> input_image_(input_tensor_size);
-        std::array<int64_t, 4> input_shape_{ 1, 3, hs, ws };
+        std::array<int64_t, 4> input_shape_{ 1, 3, ws, hs };
     
         float* output = input_image_.data();
         fill(input_image_.begin(), input_image_.end(), 0.f);
@@ -358,7 +367,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
            printf("input_type_info_dims shape [%d] =  %ld\n", i, input_type_info_dims[i]);
         }
         
-        auto output_tensors_pnet = session_PNet.Run(Ort::RunOptions{nullptr}, m_PNetInputNodeNames.data(), &input_tensor_pnet, 1, m_PNetOutputNodeNames.data(), m_PNetOutputNodeNames.size());
+        auto output_tensors_pnet = session_PNet->Run(Ort::RunOptions{nullptr}, m_PNetInputNodeNames.data(), &input_tensor_pnet, 1, m_PNetOutputNodeNames.data(), m_PNetOutputNodeNames.size());
         printf("output_tensors_pnet.size: [%d]\n", (int)output_tensors_pnet.size());
 
         //2-Y 框
@@ -421,7 +430,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
 
         vector<BoundingBox> filterOutBoxes;
         vector<BoundingBox> nmsOutBoxes;
-        generateBoundingBox(out0, output_node_dims_0, out2, output_node_dims_2, scale, P_thres, filterOutBoxes);
+        generateBoundingBox(out0, output_node_dims_0, out2, output_node_dims_2, cur_scale, P_thres, filterOutBoxes);
         printf("-------filterOutBoxes.size(): %d\n", (int)filterOutBoxes.size());
         nmsOutBoxes = nms(filterOutBoxes, 0.5, UNION);
         printf("-------nmsOutBoxes.size(): %d\n", (int)nmsOutBoxes.size());
@@ -464,14 +473,12 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         }
     }
 
-#ifdef IMAGE_DEBUG
     cv::Mat m_tmp = img.t();
     for(int k = 0; k < totalBoxes.size(); k++)
     {
         cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
     }
     imwrite("wytFace_Pnet_Out.jpg", m_tmp.t());
-#endif
 
     //the second stage: R-Net
     if(totalBoxes.size() > 0)
@@ -498,19 +505,12 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             float *input_data = input_image_.data();
             fill(input_image_.begin(), input_image_.end(), 0.f);
 
-            copy_one_patch(sample, totalBoxes[i], input_data, cv::Size(height_r, width_r), i,  "R");
-            // printf("input_data: \n");
-            // for (int j = 0; j < input_tensor_size; j ++)
-            // {
-            //     printf(" %f ", input_data[j]);
-            // }
-            // printf("\n");
-            // //return 0;
+            copy_one_patch(sample, totalBoxes[i], input_data, cv::Size(24, 24), i,  "R");
 
             // create input tensor object from data values
             Ort::Value input_tensor_rnet = Ort::Value::CreateTensor<float>(memory_info, input_image_.data(), input_image_.size(), input_shape_.data(), input_shape_.size());
 
-            auto output_tensors_rnet = session_Rnet.Run(Ort::RunOptions{nullptr}, m_RNetInputNodeNames.data(), &input_tensor_rnet, 1, m_RNetOutputNodeNames.data(), m_RNetOutputNodeNames.size());
+            auto output_tensors_rnet = session_RNet->Run(Ort::RunOptions{nullptr}, m_RNetInputNodeNames.data(), &input_tensor_rnet, 1, m_RNetOutputNodeNames.data(), m_RNetOutputNodeNames.size());
             // printf("output_tensors_rnet.size: [%d]\n", (int)output_tensors_rnet.size());
 
             //conv5-2_Gemm_Y
@@ -525,13 +525,10 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
 
             float *outarr0 = output_tensors_rnet[0].GetTensorMutableData<float>();
             printf("tensor_size_0: %d \n", (int)tensor_size_0);
-            //printf("pos: \n");
             for (int j = 0; j < tensor_size_0; j++)
             {
                 out0.push_back(outarr0[j]);
-                //printf(" %f ", outarr0[j]);
             }
-            //printf("\n");
 
             //prob1_Y
             //printf("----------------prob1_Y------------------\n");
@@ -546,14 +543,10 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             }
 
             float *outarr1 = output_tensors_rnet[1].GetTensorMutableData<float>();
-            //printf("tensor_size_1: %d \n", (int)tensor_size_1);
-            //printf("score: \n");
             for (int j = 0; j < tensor_size_1; j++)
             {
                 out1.push_back(outarr1[j]);
-                //printf(" %f ", outarr1[j]);
             }
-            //printf("\n");
         }
         vector<BoundingBox> filterOutBoxes;
         filteroutBoundingBox(totalBoxes, out0, output_node_dims_0, out1, output_node_dims_1, vector<float>(), vector<int64_t>(), R_thres, filterOutBoxes);
@@ -562,14 +555,13 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         totalBoxes = nms(filterOutBoxes, 0.7, UNION);
         printf("totalBoxes.size = %zu \n", totalBoxes.size());
 
-#ifdef IMAGE_DEBUG
         cv::Mat m_tmp = img.t();
         for(int k = 0; k < totalBoxes.size(); k++)
         {
             cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
         }
         imwrite("wytFace_Rnet_Out.jpg", m_tmp.t());
-#endif
+
     }
 
     // do third stage: O-Net
@@ -604,7 +596,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             // create input tensor object from data values
             Ort::Value input_tensor_onet = Ort::Value::CreateTensor<float>(memory_info, input_image_.data(), input_image_.size(), input_shape_.data(), input_shape_.size());
 
-            auto output_tensors_onet = session_Onet.Run(Ort::RunOptions{nullptr}, m_ONetInputNodeNames.data(), &input_tensor_onet, m_ONetInputNodeNames.size(), m_ONetOutputNodeNames.data(), m_ONetOutputNodeNames.size());
+            auto output_tensors_onet = session_ONet->Run(Ort::RunOptions{nullptr}, m_ONetInputNodeNames.data(), &input_tensor_onet, m_ONetInputNodeNames.size(), m_ONetOutputNodeNames.data(), m_ONetOutputNodeNames.size());
 
             //conv6-2_Gemm_Y  boxes
             printf("---------------conv6-2_Gemm_Y-------------------\n");
@@ -680,14 +672,13 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         totalBoxes = nms(filterOutBoxes, 0.7, MIN);
         printf("totalBoxes.size = %zu \n", totalBoxes.size());
 
-#ifdef IMAGE_DEBUG
         cv::Mat m_tmp = img.t();
         for(int k = 0; k < totalBoxes.size(); k++)
         {
             cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
         }
         imwrite("wytFace_Onet_Out.jpg", m_tmp.t());
-#endif
+
     }
 
     for(int i = 0; i < totalBoxes.size(); i++)

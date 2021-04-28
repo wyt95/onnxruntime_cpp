@@ -27,60 +27,6 @@ using namespace cv;
 #define YKX_FAILED      1
 #define YKX_PARAM_ERROR 2
 
-Ort::Env env{ ORT_LOGGING_LEVEL_WARNING, "test" };
-
-void readFileList(const char* basePath, vector<string>& imgFiles)
-{
-    DIR *dir;
-    struct dirent *ptr;
-    char base[1000];
-    
-    if( (dir=opendir(basePath)) == NULL)
-    {
-        return ;
-    }
-    
-    while( (ptr = readdir(dir)) != NULL)
-    {
-        if(strcmp(ptr->d_name,".") == 0 ||
-            strcmp(ptr->d_name, "..") == 0)
-            continue;
-        else if(ptr->d_type == 8)//file 
-        {
-            int len = strlen(ptr->d_name);
-            if(ptr->d_name[len-1] == 'g' && ptr->d_name[len-2] == 'p' && ptr->d_name[len-3] == 'j')
-            {
-                memset(base, '\0', sizeof(base));
-                strcpy(base, basePath);
-                strcat(base, "/");
-                strcat(base, ptr->d_name);
-                imgFiles.push_back(base);
-            }
-        }
-        else if(ptr->d_type == 10)/// link file
-        {
-            int len = strlen(ptr->d_name);
-            if(ptr->d_name[len-1] == 'g' && ptr->d_name[len-2] == 'p' && ptr->d_name[len-3] == 'j')
-            {
-                memset(base, '\0', sizeof(base));
-                strcpy(base, basePath);
-                strcat(base, "/");
-                strcat(base, ptr->d_name);
-                imgFiles.push_back(base);
-            }
-        }
-        else if(ptr->d_type == 4)//dir
-        {
-            memset(base, '\0', sizeof(base));
-            strcpy(base, basePath);
-            strcat(base, "/");
-            strcat(base, ptr->d_name);
-            readFileList(base, imgFiles);
-        }
-    }
-    closedir(dir);
-}
-
 template <typename T>
 static void softmax(T& input) {
     float rowmax = *std::max_element(input.begin(), input.end());
@@ -101,11 +47,6 @@ static void softmax(T& input) {
 class FaceDetector
 {
 public:
-    struct FaceInfo
-    {
-
-    };
-
     enum COLOR_ORDER{
         GRAY,
         RGBA,
@@ -161,12 +102,15 @@ private:
 
 private:
     Ort::SessionOptions session_option;
-    Ort::MemoryInfo     memory_info;
-    Ort::Session        session_PNet;
-    Ort::Session        session_RNet;
-    Ort::Session        session_ONet;
+    //Ort::MemoryInfo     memory_info;
+    std::unique_ptr<Ort::Session>    session_PNet;
+    std::unique_ptr<Ort::Session>    session_RNet;
+    std::unique_ptr<Ort::Session>    session_ONet;
+    std::unique_ptr<Ort::Env>        m_OrtEnv;
+
 
     //model dir
+    std::vector<string> m_model_dir;
     std::string      m_pModel_dir;
     std::string      m_rModel_dir;
     std::string      m_oModel_dir;
@@ -195,7 +139,7 @@ private:
     std::mutex m_onnx_mutex;
 
 public:
-    FaceDetector(std::vector<string> model_dir/*, const MODEL_VERSION model_version*/);
+    FaceDetector(std::vector<string> model_dir);
 
     ~FaceDetector();
     
@@ -206,23 +150,24 @@ public:
     //Get model I/O info.
     int64_t GetOnnxModelInfo(std::vector<string> model_dir);
 
-    void GetOnnxModelInputInfo(Ort::Session& session_net, 
+    void GetOnnxModelInputInfo(Ort::Session &session_net, 
                                std::vector<const char*> &input_node_names, 
-                               std::vector<int64_t> &input_node_dims, 
+                               vector<vector<int64_t> > &input_node_dims, 
                                std::vector<const char*> &output_node_names, 
-                               std::vector<int64_t> &output_node_dims);
+                               vector<vector<int64_t> > &output_node_dims);
 
-    void Release();
+    void Init();
 
 private:
-    void generateBoundingBox(const vector<float>& boxRegs, const vector<int>& box_shape,
-                             const vector<float>& cls, const vector<int>& cls_shape,
+    void generateBoundingBox(const vector<float>& boxRegs, const vector<int64_t>& box_shape,
+                             const vector<float>& cls, const vector<int64_t>& cls_shape,
                              float scale, float threshold, vector<BoundingBox>& filterOutBoxes
                             );
+
     void filteroutBoundingBox(const vector<BoundingBox>& boxes, 
-                              const vector<float>& boxRegs, const vector<int>& box_shape,
-                              const vector<float>& cls, const vector<int>& cls_shape,
-                              const vector< float >& points, const vector< int >& points_shape,
+                              const vector<float>& boxRegs, const vector<int64_t>& box_shape,
+                              const vector<float>& cls, const vector<int64_t>& cls_shape,
+                              const vector< float >& points, const vector< int64_t >& points_shape,
                               float threshold, vector<BoundingBox>& filterOutBoxes);
 
     float iou(BoundingBox box1, BoundingBox box2, NMS_TYPE type);
