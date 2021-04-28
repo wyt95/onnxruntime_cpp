@@ -29,7 +29,7 @@ void FaceDetector::Release()
     ;
 }
 
-void FaceDetector::copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int i, const char *p_str)
+void FaceDetector::copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int idx, const char *p_str)
 {
     cv::Mat copy_img = img.clone();
     cv::Mat chop_img;
@@ -40,7 +40,7 @@ void FaceDetector::copy_one_patch(const cv::Mat& img, BoundingBox& input_box, fl
     float src_width = abs(input_box.py1 - input_box.py2);
 #ifdef IMAGE_DEBUG
     printf("src_height:%f, src_width:%f\n", src_height, src_width);
-    printf("===%d===px1: %d; px2: %d; py1: %d; py2: %d\n", i, input_box.px1, input_box.px2, input_box.py1, input_box.py2);
+    printf("===%d===px1: %d; px2: %d; py1: %d; py2: %d\n", idx, input_box.px1, input_box.px2, input_box.py1, input_box.py2);
 #endif
     chop_img = copy_img(cv::Range(input_box.px1, input_box.px2), cv::Range(input_box.py1, input_box.py2));
 

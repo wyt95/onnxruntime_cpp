@@ -230,7 +230,7 @@ private:
 
     void Padding(vector<BoundingBox> &totalBoxes, int img_w, int img_h);
 
-    void copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int i, const char *p_str);
+    void copy_one_patch(const cv::Mat& img, BoundingBox& input_box, float *data_to, cv::Size target_size, int idx, const char *p_str);
 };
 
 #endif
