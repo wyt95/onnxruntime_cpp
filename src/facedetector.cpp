@@ -15,6 +15,10 @@ FaceDetector::FaceDetector(std::vector<string> model_dir)
 FaceDetector::~FaceDetector()
 {
     //Release();
+    session_PNet.reset();
+    session_RNet.reset();
+    session_ONet.reset();
+    m_OrtEnv.reset();
 }
 
 void FaceDetector::Init()
@@ -68,7 +72,7 @@ void FaceDetector::generateBoundingBox(const vector<float>& boxRegs, const vecto
     int cellsize = 12;
     int w = box_shape[3];
     int h = box_shape[2];
-    //int n = box_shape[0];
+
     for(int y = 0; y < h; y ++)
     {
         for(int x = 0; x < w; x ++)
@@ -190,8 +194,6 @@ void FaceDetector::GetOnnxModelInputInfo(Ort::Session &session_net,
 {
     size_t num_input_nodes = session_net.GetInputCount();
     input_node_names.resize(num_input_nodes);
-    //std::vector<int64_t> input_node_dims;
-    //char* input_name = nullptr;
 
     // print model input layer (node names, types, shape etc.)
     Ort::AllocatorWithDefaultOptions allocator;
@@ -362,68 +364,33 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
 
         auto input_type_info = input_tensor_pnet.GetTensorTypeAndShapeInfo();
         std::vector<int64_t> input_type_info_dims = input_type_info.GetShape();
-        for (int i = 0; i < input_type_info_dims.size(); i++)
-        {
-           printf("input_type_info_dims shape [%d] =  %ld\n", i, input_type_info_dims[i]);
-        }
         
         auto output_tensors_pnet = session_PNet->Run(Ort::RunOptions{nullptr}, m_PNetInputNodeNames.data(), &input_tensor_pnet, 1, m_PNetOutputNodeNames.data(), m_PNetOutputNodeNames.size());
-        printf("output_tensors_pnet.size: [%d]\n", (int)output_tensors_pnet.size());
 
         //2-Y 框
-        printf("---------------2-Y-------------------\n");
-        printf("Output %s:\n", m_PNetOutputNodeNames[0]);
         Ort::TypeInfo type_info_0 = output_tensors_pnet[0].GetTypeInfo();
         auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
         size_t tensor_size_0 = tensor_info_0.GetElementCount();
         vector<int64_t>  output_node_dims_0 = tensor_info_0.GetShape();
-        //printf("output_node_dims_0: %d \n", (int)output_node_dims_0.size());
-        // printf("output_node_dims_0 shape: ");
-        // for(int i=0; i < output_node_dims_0.size(); i++)
-        // {
-        //     printf("  %ld  ", output_node_dims_0[i]);
-        // }
-        // printf("\n");
+
         float *outarr0 = output_tensors_pnet[0].GetTensorMutableData<float>();
-        printf("tensor_size_0: %d \n", (int)tensor_size_0);
         vector<float> out0{outarr0, outarr0 + tensor_size_0};
-        printf("out0_size: %d \n", (int)out0.size());
 
         //P-Y softmaxOutput
-        //printf("----------------P-Y------------------\n");
-        //printf("Output %s:\n", m_PNetOutputNodeNames[1]);
         Ort::TypeInfo type_info_1 = output_tensors_pnet[1].GetTypeInfo();
         auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
         size_t tensor_size_1 = tensor_info_1.GetElementCount();
         vector<int64_t>  output_node_dims_1 = tensor_info_1.GetShape();
-        //printf("output_node_dims_1: %d \n", (int)output_node_dims_1.size());
-        //printf("output_node_dims_1 shape: ");
-        // for(int i=0; i < output_node_dims_1.size(); i++)
-        // {
-        //     printf("  %ld  ", output_node_dims_1[i]);
-        // }
-        // printf("\n");
+
         float *outarr1 = output_tensors_pnet[1].GetTensorMutableData<float>();
-        //printf("tensor_size_1: %d \n", (int)tensor_size_1);
         vector<float> out1{outarr1, outarr1 + tensor_size_1};
-        printf("out0_size: %d \n", (int)out1.size());
         
         //1-Y nosoftmax
-        //printf("----------------1-Y------------------\n");
-        //printf("Output %s:\n", m_PNetOutputNodeNames[2]);
         Ort::TypeInfo type_info_2 = output_tensors_pnet[2].GetTypeInfo();
         auto tensor_info_2 = type_info_2.GetTensorTypeAndShapeInfo();
         size_t tensor_size_2 = tensor_info_2.GetElementCount();
         vector<int64_t>  output_node_dims_2 = tensor_info_2.GetShape();
-        //printf("output_node_dims_2: %d \n", (int)output_node_dims_2.size());
-        // printf("output_node_dims_2 shape: ");
-        // for(int i=0; i < output_node_dims_2.size(); i++)
-        // {
-        //     printf("  %ld  ", output_node_dims_2[i]);
-        // }
-        // printf("\n");
         float *outarr2 = output_tensors_pnet[2].GetTensorMutableData<float>();
-        printf("tensor_size_2: %d \n", (int)tensor_size_2);
         vector<float> out2{outarr2, outarr2 + tensor_size_2};
 
         softmax(out2);
@@ -431,13 +398,10 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         vector<BoundingBox> filterOutBoxes;
         vector<BoundingBox> nmsOutBoxes;
         generateBoundingBox(out0, output_node_dims_0, out2, output_node_dims_2, cur_scale, P_thres, filterOutBoxes);
-        printf("-------filterOutBoxes.size(): %d\n", (int)filterOutBoxes.size());
         nmsOutBoxes = nms(filterOutBoxes, 0.5, UNION);
-        printf("-------nmsOutBoxes.size(): %d\n", (int)nmsOutBoxes.size());
         if(nmsOutBoxes.size() > 0)
         {
             totalBoxes.insert(totalBoxes.end(), nmsOutBoxes.begin(), nmsOutBoxes.end());
-            printf("======1=====>totalBoxes.size(): %d\n", (int)totalBoxes.size());
         }
 
     }
@@ -468,17 +432,16 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             x2 = x1 + l;
             y2 = y1 + l;
             box.x1 = x1, box.x2 = x2, box.y1 = y1, box.y2 = y2;
-            //printf("===%d===box.x1: %f; box.x2: %f; box.y1: %f; box.y2: %f\n", i, box.x1, box.x2, box.y1, box.y2);
             totalBoxes.push_back(box);
         }
     }
 
-    cv::Mat m_tmp = img.t();
-    for(int k = 0; k < totalBoxes.size(); k++)
-    {
-        cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
-    }
-    imwrite("wytFace_Pnet_Out.jpg", m_tmp.t());
+    // cv::Mat m_tmp = img.t();
+    // for(int k = 0; k < totalBoxes.size(); k++)
+    // {
+    //     cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
+    // }
+    // imwrite("wytFace_Pnet_Out.jpg", m_tmp.t());
 
     //the second stage: R-Net
     if(totalBoxes.size() > 0)
@@ -498,7 +461,6 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         Padding(totalBoxes, img_W, img_H);
         for (int i = 0; i < batch; i++)
         {
-            printf("==============batch===%d=========>\n", i);
             size_t input_tensor_size = 1 * channel * height_r * width_r;
             std::vector<float> input_image_(input_tensor_size);
 
@@ -511,11 +473,8 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             Ort::Value input_tensor_rnet = Ort::Value::CreateTensor<float>(memory_info, input_image_.data(), input_image_.size(), input_shape_.data(), input_shape_.size());
 
             auto output_tensors_rnet = session_RNet->Run(Ort::RunOptions{nullptr}, m_RNetInputNodeNames.data(), &input_tensor_rnet, 1, m_RNetOutputNodeNames.data(), m_RNetOutputNodeNames.size());
-            // printf("output_tensors_rnet.size: [%d]\n", (int)output_tensors_rnet.size());
 
             //conv5-2_Gemm_Y
-            //printf("---------------conv5-2_Gemm_Y-------------------\n");
-            //printf("Output %s:\n", m_RNetOutputNodeNames[0]);
             Ort::TypeInfo type_info_0 = output_tensors_rnet[0].GetTypeInfo();
             auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
             size_t tensor_size_0 = tensor_info_0.GetElementCount();
@@ -524,15 +483,12 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
                 output_node_dims_0.push_back(it);
 
             float *outarr0 = output_tensors_rnet[0].GetTensorMutableData<float>();
-            printf("tensor_size_0: %d \n", (int)tensor_size_0);
             for (int j = 0; j < tensor_size_0; j++)
             {
                 out0.push_back(outarr0[j]);
             }
 
             //prob1_Y
-            //printf("----------------prob1_Y------------------\n");
-            //printf("Output %s:\n", m_RNetOutputNodeNames[1]);
             Ort::TypeInfo type_info_1 = output_tensors_rnet[1].GetTypeInfo();
             auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
             size_t tensor_size_1 = tensor_info_1.GetElementCount();
@@ -550,17 +506,15 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         }
         vector<BoundingBox> filterOutBoxes;
         filteroutBoundingBox(totalBoxes, out0, output_node_dims_0, out1, output_node_dims_1, vector<float>(), vector<int64_t>(), R_thres, filterOutBoxes);
-        printf("filterOutBoxes.size = %zu \n", filterOutBoxes.size());
         totalBoxes.clear();
         totalBoxes = nms(filterOutBoxes, 0.7, UNION);
-        printf("totalBoxes.size = %zu \n", totalBoxes.size());
 
-        cv::Mat m_tmp = img.t();
-        for(int k = 0; k < totalBoxes.size(); k++)
-        {
-            cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
-        }
-        imwrite("wytFace_Rnet_Out.jpg", m_tmp.t());
+        // cv::Mat m_tmp = img.t();
+        // for(int k = 0; k < totalBoxes.size(); k++)
+        // {
+        //     cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
+        // }
+        // imwrite("wytFace_Rnet_Out.jpg", m_tmp.t());
 
     }
 
@@ -584,7 +538,6 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
         Padding(totalBoxes, img_W, img_H);
         for (int i = 0; i < batch; i++)
         {
-            printf("==============batch===%d=========>\n", i);
             size_t input_tensor_size = 1 * channel * height_o * width_o;
             std::vector<float> input_image_(input_tensor_size);
 
@@ -599,8 +552,6 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             auto output_tensors_onet = session_ONet->Run(Ort::RunOptions{nullptr}, m_ONetInputNodeNames.data(), &input_tensor_onet, m_ONetInputNodeNames.size(), m_ONetOutputNodeNames.data(), m_ONetOutputNodeNames.size());
 
             //conv6-2_Gemm_Y  boxes
-            printf("---------------conv6-2_Gemm_Y-------------------\n");
-            printf("Output %s:\n", m_ONetOutputNodeNames[0]);
             Ort::TypeInfo type_info_0 = output_tensors_onet[0].GetTypeInfo();
             auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
             size_t tensor_size_0 = tensor_info_0.GetElementCount();
@@ -611,18 +562,12 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             }
 
             float *outarr0 = output_tensors_onet[0].GetTensorMutableData<float>();
-            printf("tensor_size_0: %d \n", (int)tensor_size_0);
-            printf("conv6-2_Gemm_Y boxes: \n");
             for (int j = 0; j < tensor_size_0; j++)
             {
                 out0.push_back(outarr0[j]);
-                printf(" %f ", outarr0[j]);
             }
-            printf("\n");
 
             // conv6-3_Gemm_Y landmark
-            printf("----------------conv6-3_Gemm_Y------------------\n");
-            printf("Output %s:\n", m_ONetOutputNodeNames[1]);
             Ort::TypeInfo type_info_1 = output_tensors_onet[1].GetTypeInfo();
             auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
             size_t tensor_size_1 = tensor_info_1.GetElementCount();
@@ -633,18 +578,12 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             }
 
             float *outarr1 = output_tensors_onet[1].GetTensorMutableData<float>();
-            printf("tensor_size_1: %d \n", (int)tensor_size_1);
-            printf("conv6-3_Gemm_Y landmark: \n");
             for (int j = 0; j < tensor_size_1; j++)
             {
                 out1.push_back(outarr1[j]);
-                printf(" %f ", outarr1[j]);
             }
-            printf("\n");
 
             // prob1_Y prob
-            printf("----------------prob1_Y------------------\n");
-            printf("Output %s:\n", m_ONetOutputNodeNames[2]);
             Ort::TypeInfo type_info_2 = output_tensors_onet[2].GetTypeInfo();
             auto tensor_info_2 = type_info_2.GetTensorTypeAndShapeInfo();
             size_t tensor_size_2 = tensor_info_2.GetElementCount();
@@ -655,29 +594,23 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             }
             
             float *outarr2 = output_tensors_onet[2].GetTensorMutableData<float>();
-            printf("tensor_size_2: %d \n", (int)tensor_size_2);
-            printf("prob1_Y prob: \n");
             for (int j = 0; j < tensor_size_2; j++)
             {
                 out2.push_back(outarr2[j]);
-                printf(" %f ", outarr2[j]);
             }
-            printf("\n==================end=================\n");
         }
 
         vector<BoundingBox> filterOutBoxes;
         filteroutBoundingBox(totalBoxes, out0, output_node_dims_0, out2, output_node_dims_2, out1, output_node_dims_1, O_thres, filterOutBoxes);
-        printf("filterOutBoxes.size = %zu \n", filterOutBoxes.size());
         totalBoxes.clear();
         totalBoxes = nms(filterOutBoxes, 0.7, MIN);
-        printf("totalBoxes.size = %zu \n", totalBoxes.size());
 
-        cv::Mat m_tmp = img.t();
-        for(int k = 0; k < totalBoxes.size(); k++)
-        {
-            cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
-        }
-        imwrite("wytFace_Onet_Out.jpg", m_tmp.t());
+        // cv::Mat m_tmp = img.t();
+        // for(int k = 0; k < totalBoxes.size(); k++)
+        // {
+        //     cv::rectangle(m_tmp, cv::Point(totalBoxes[k].x1, totalBoxes[k].y1), cv::Point(totalBoxes[k].x2, totalBoxes[k].y2), cv::Scalar(0, 255, 0), 2);
+        // }
+        // imwrite("wytFace_Onet_Out.jpg", m_tmp.t());
 
     }
 

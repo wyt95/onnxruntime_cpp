@@ -37,17 +37,22 @@ void readFileList(const char* basePath, vector<string>& imgFiles)
 
 int main(int argc, char **argv)
 {
-    vector<string> model_path{"/mnt/share/onnxruntime_cpp/bin/optimaizer_pnet.onnx", 
-                            "/mnt/share/onnxruntime_cpp/bin/optimaizer_rnet.onnx",
-                            "/mnt/share/onnxruntime_cpp/bin/optimaizer_onet.onnx"};
+    double timeStart = (double)getTickCount();
+    vector<string> model_path{"../model/optimaizer_pnet.onnx", 
+                            "../model/optimaizer_rnet.onnx",
+                            "../model/optimaizer_onet.onnx"};
     cout << "model_path :" << model_path.size() << endl;
     FaceDetector *fd = new FaceDetector(model_path);
+
     cout << "FaceDetector Init()....." << endl;
     fd->Init();
-    
+
+    double nTime_1 = ((double)getTickCount() - timeStart) / getTickFrequency();
+    cout << "running time init ：" << nTime_1 << "sec\n" << endl;
+
     vector<string> imgList;
     cout << "start readFileList....." << endl;
-    readFileList("./face/", imgList);
+    readFileList("../face", imgList);
     cout << "start anylyis....." << endl;
     cout << "imgList size : " << imgList.size() << endl;
     for(int i = 0; i < imgList.size(); i ++)
@@ -62,9 +67,13 @@ int main(int argc, char **argv)
             for(int i = 0; i < 5; i ++)
                 cv::circle(testImg, cv::Point(res[k].points_x[i], res[k].points_y[i]), 2, cv::Scalar(0, 255, 255), 2);
         }
-        string picName = "test" + to_string(i) + ".jpg";
+        string picName = "../out/test" + to_string(i) + ".jpg";
         cv::imwrite(picName, testImg);
     }
+
+    delete fd;
+    double nTime = ((double)getTickCount() - timeStart) / getTickFrequency();
+    cout << "running time ：" << nTime << "sec\n" << endl;
     cout << "end anylyis....." << endl;
     return 0;
 }
