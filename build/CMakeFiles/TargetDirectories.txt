@@ -1,3 +1,0 @@
-/mnt/share/onnxruntime-projects/Ubuntu/MyOnnx/build/CMakeFiles/rebuild_cache.dir
-/mnt/share/onnxruntime-projects/Ubuntu/MyOnnx/build/CMakeFiles/edit_cache.dir
-/mnt/share/onnxruntime-projects/Ubuntu/MyOnnx/build/CMakeFiles/demo.dir
