@@ -72,7 +72,7 @@ int main(int argc, char **argv)
     }
 
     delete fd;
-    double nTime = ((double)getTickCount() - timeStart) / getTickFrequency();
+    double nTime = ((double)getTickCount() - timeStart) / getTickFrequency(); //总耗时0.48s,单张图片0.24s,模型初始化0.24s
     cout << "running time ：" << nTime << "sec\n" << endl;
     cout << "end anylyis....." << endl;
     return 0;

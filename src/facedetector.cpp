@@ -478,9 +478,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             Ort::TypeInfo type_info_0 = output_tensors_rnet[0].GetTypeInfo();
             auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
             size_t tensor_size_0 = tensor_info_0.GetElementCount();
-            vector<int64_t>  m_vecOut0 = tensor_info_0.GetShape();
-            for (auto it : m_vecOut0)
-                output_node_dims_0.push_back(it);
+            output_node_dims_0 = tensor_info_0.GetShape();
 
             float *outarr0 = output_tensors_rnet[0].GetTensorMutableData<float>();
             for (int j = 0; j < tensor_size_0; j++)
@@ -492,11 +490,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             Ort::TypeInfo type_info_1 = output_tensors_rnet[1].GetTypeInfo();
             auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
             size_t tensor_size_1 = tensor_info_1.GetElementCount();
-            vector<int64_t>  m_vecOut1 = tensor_info_1.GetShape();
-            for (auto it : m_vecOut1)
-            {
-                output_node_dims_1.push_back(it);
-            }
+            output_node_dims_1 = tensor_info_1.GetShape();
 
             float *outarr1 = output_tensors_rnet[1].GetTensorMutableData<float>();
             for (int j = 0; j < tensor_size_1; j++)
@@ -555,11 +549,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             Ort::TypeInfo type_info_0 = output_tensors_onet[0].GetTypeInfo();
             auto tensor_info_0 = type_info_0.GetTensorTypeAndShapeInfo();
             size_t tensor_size_0 = tensor_info_0.GetElementCount();
-            vector<int64_t>  m_vecOut0 = tensor_info_0.GetShape();
-            for (auto it : m_vecOut0)
-            {
-                output_node_dims_0.push_back(it);
-            }
+            output_node_dims_0 = tensor_info_0.GetShape();
 
             float *outarr0 = output_tensors_onet[0].GetTensorMutableData<float>();
             for (int j = 0; j < tensor_size_0; j++)
@@ -571,11 +561,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             Ort::TypeInfo type_info_1 = output_tensors_onet[1].GetTypeInfo();
             auto tensor_info_1 = type_info_1.GetTensorTypeAndShapeInfo();
             size_t tensor_size_1 = tensor_info_1.GetElementCount();
-            vector<int64_t>  m_vecOut1 = tensor_info_1.GetShape();
-            for (auto it : m_vecOut1)
-            {
-                output_node_dims_1.push_back(it);
-            }
+            output_node_dims_1 = tensor_info_1.GetShape();
 
             float *outarr1 = output_tensors_onet[1].GetTensorMutableData<float>();
             for (int j = 0; j < tensor_size_1; j++)
@@ -587,11 +573,7 @@ vector< FaceDetector::BoundingBox > FaceDetector::Detect(const cv::Mat& img, con
             Ort::TypeInfo type_info_2 = output_tensors_onet[2].GetTypeInfo();
             auto tensor_info_2 = type_info_2.GetTensorTypeAndShapeInfo();
             size_t tensor_size_2 = tensor_info_2.GetElementCount();
-            vector<int64_t>  m_vecOut2 = tensor_info_2.GetShape();
-            for (auto it : m_vecOut2)
-            {
-                output_node_dims_2.push_back(it);
-            }
+            output_node_dims_2 = tensor_info_2.GetShape();
             
             float *outarr2 = output_tensors_onet[2].GetTensorMutableData<float>();
             for (int j = 0; j < tensor_size_2; j++)
