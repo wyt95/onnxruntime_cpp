@@ -1,6 +1,6 @@
 # onnxruntime_cpp
 
-opencv 2.4.9
+opencv 4.5.2
 
 onnxruntime 1.7.0
 
